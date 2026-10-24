@@ -62,7 +62,7 @@ import LimitBarCore
         panel.contentView = GlassSurface.make(content: hosting)
         DispatchQueue.main.async { self.resizePanel(hosting.fittingSize) }
         installEventMonitors()
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePanel)
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
