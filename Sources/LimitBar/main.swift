@@ -62,7 +62,7 @@ import LimitBarCore
         panel.contentView = GlassSurface.make(content: hosting)
         DispatchQueue.main.async { self.resizePanel(hosting.fittingSize) }
         installEventMonitors()
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePanel)
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -78,19 +78,12 @@ import LimitBarCore
         }
     }
     func updateStatus() {
-        let title = NSMutableAttributedString()
-        for (index, provider) in ProviderID.allCases.enumerated() {
-            if index > 0 { title.append(NSAttributedString(string: "   ")) }
-            let attachment = NSTextAttachment()
-            attachment.image = BrandAssets.menuMark(provider)
-            attachment.bounds = NSRect(x: 0, y: -3, width: 14, height: 14)
-            title.append(NSAttributedString(attachment: attachment))
-            title.append(NSAttributedString(string: " " + store.menuText(for: provider)))
-        }
+        let image = NSImage(systemSymbolName: "gauge.with.dots.needle.67percent", accessibilityDescription: "LimitBar")
+        image?.isTemplate = true
+        statusItem.button?.image = image
+        statusItem.button?.title = ""
         DispatchQueue.main.async { self.resizePanel(self.hostingView.fittingSize) }
-        title.addAttribute(.font, value: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), range: NSRange(location: 0, length: title.length))
-        statusItem.button?.attributedTitle = title
-        statusItem.button?.toolTip = "LimitBar — Claude and Codex subscription limits\nEach percentage is the most used quota window\(store.showRemaining ? " (shown as remaining)" : "")."
+        statusItem.button?.toolTip = "LimitBar — Claude \(store.menuText(for: .claude)), Codex \(store.menuText(for: .codex))\nEach percentage is the most used quota window\(store.showRemaining ? " (shown as remaining)" : "")."
         statusItem.button?.setAccessibilityLabel("LimitBar. Claude \(store.menuText(for: .claude)), Codex \(store.menuText(for: .codex)).")
     }
     @objc func togglePanel() {
