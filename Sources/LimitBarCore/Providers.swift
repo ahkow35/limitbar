@@ -1,7 +1,5 @@
 import Foundation
 import CryptoKit
-import Security
-import LocalAuthentication
 
 public struct ClaudeProvider: UsageProvider {
     public let id = ProviderID.claude
@@ -62,31 +60,34 @@ private struct ClaudeCredentials {
         let service = override.map { dir in
             "Claude Code-credentials-" + SHA256.hash(data: Data(dir.utf8)).map { String(format: "%02x", $0) }.joined().prefix(8)
         } ?? "Claude Code-credentials"
-        let context = LAContext()
-        context.interactionNotAllowed = !allowInteraction
-        // Claude Code uses the legacy login keychain, whose ACL prompts do not honor
-        // LAContext.interactionNotAllowed alone. Suppress legacy UI for background reads.
-        var previousInteraction = DarwinBoolean(true)
-        SecKeychainGetUserInteractionAllowed(&previousInteraction)
-        if !allowInteraction { SecKeychainSetUserInteractionAllowed(false) }
-        defer { if !allowInteraction { SecKeychainSetUserInteractionAllowed(previousInteraction.boolValue) } }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecReturnData as String: true,
-            kSecUseAuthenticationUI as String: allowInteraction ? kSecUseAuthenticationUIAllow : kSecUseAuthenticationUIFail,
-            kSecUseAuthenticationContext as String: context
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else {
-            if status == errSecInteractionNotAllowed || status == errSecAuthFailed || status == errSecUserCanceled {
-                throw ProviderFailure(.authentication, "Click Connect to allow access to your Claude Code sign-in in Keychain.")
-            }
-            throw ProviderFailure(.authentication, "Sign in with claude auth login in Terminal, then click Connect.")
-        }
+        // Read through /usr/bin/security, the tool Claude Code itself uses to write this entry,
+        // so the access grant does not depend on this app's own (ad-hoc, rebuild-changing)
+        // signature. Reading with SecItemCopyMatching kept losing "Always Allow" and asking to
+        // Connect again.
+        let data = try readKeychainSecret(service: service)
         return try parse(data)
+    }
+    static func readKeychainSecret(service: String) throws -> Data {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", service, "-w"]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch {
+            throw ProviderFailure(.authentication, "Couldn’t open Keychain to read your Claude Code sign-in.")
+        }
+        let timeout = DispatchWorkItem { process.terminate() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 10, execute: timeout)
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        timeout.cancel()
+        switch process.terminationStatus {
+        case 0: break
+        case 44: throw ProviderFailure(.authentication, "Sign in with claude auth login in Terminal, then refresh.")
+        default: throw ProviderFailure(.authentication, "Click Connect to allow access to your Claude Code sign-in in Keychain.")
+        }
+        return Data(String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines).utf8)
     }
     static func parse(_ data: Data) throws -> ClaudeCredentials {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
